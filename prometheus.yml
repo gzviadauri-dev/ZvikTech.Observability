@@ -1,0 +1,31 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    environment: "local-dev"
+
+scrape_configs:
+  # ── OTEL Collector self-metrics ──────────────────────────────────────────
+  # Scrapes metrics produced by the collector itself (pipeline throughput, drops, etc.)
+  - job_name: "otel-collector"
+    static_configs:
+      - targets: ["otel-collector:8888"]
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+
+  # ── Sample API /metrics endpoint ─────────────────────────────────────────
+  # Scrapes the Prometheus scraping endpoint exposed by the app when
+  # Observability:Telemetry:Metrics:PrometheusEnabled = true.
+  - job_name: "sample-api"
+    static_configs:
+      - targets: ["sample-api:8080"]
+    metrics_path: "/metrics"
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+
+  # ── Prometheus self-monitoring ────────────────────────────────────────────
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]

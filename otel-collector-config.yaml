@@ -1,0 +1,91 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  OpenTelemetry Collector pipeline configuration
+#
+#  Flow:
+#    App → [OTLP gRPC/HTTP :4317/:4318]
+#        → filter/health (drop health + metrics spans)
+#        → batch
+#        → Jaeger (traces) / Prometheus (metrics)
+# ─────────────────────────────────────────────────────────────────────────────
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: "0.0.0.0:4317"
+      http:
+        endpoint: "0.0.0.0:4318"
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 512
+
+  # Drop health-check and metrics-scraping spans to keep Jaeger clean.
+  filter/health:
+    error_mode: ignore
+    traces:
+      span:
+        - 'attributes["http.target"] == "/health"'
+        - 'attributes["http.target"] == "/metrics"'
+        - 'attributes["http.route"] == "/health"'
+        - 'attributes["http.route"] == "/metrics"'
+        - 'attributes["url.path"] == "/health"'
+        - 'attributes["url.path"] == "/metrics"'
+
+  # Add resource attributes to help correlate across signals.
+  resource:
+    attributes:
+      - key: collector.version
+        value: "0.102.0"
+        action: insert
+
+exporters:
+  # Forward traces to Jaeger via OTLP gRPC.
+  # Jaeger all-in-one listens on its internal port 4317, exposed as 4319 on the host
+  # to avoid conflict with the collector's own 4317.
+  otlp/jaeger:
+    endpoint: "jaeger:4317"
+    tls:
+      insecure: true
+
+  # Expose metrics on :8888 for Prometheus to scrape.
+  prometheus:
+    endpoint: "0.0.0.0:8888"
+    namespace: "otelcol"
+    const_labels:
+      collector: "company-observability"
+
+  # Debug exporter — logs exported spans/metrics to collector stdout (useful in dev).
+  debug:
+    verbosity: basic
+
+extensions:
+  health_check:
+    endpoint: "0.0.0.0:13133"
+  pprof:
+    endpoint: "0.0.0.0:1777"
+  zpages:
+    endpoint: "0.0.0.0:55679"
+
+service:
+  extensions: [health_check, pprof, zpages]
+
+  pipelines:
+    # Traces: receive → drop health spans → batch → Jaeger
+    traces:
+      receivers: [otlp]
+      processors: [filter/health, batch]
+      exporters: [otlp/jaeger]
+
+    # Metrics: receive → batch → Prometheus (via scraping endpoint on :8888)
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [prometheus]
+
+  telemetry:
+    logs:
+      level: "warn"
+    metrics:
+      address: "0.0.0.0:8888"

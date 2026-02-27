@@ -1,0 +1,192 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Company.Observability — local development full-stack
+#
+#  Services:
+#    - mongodb        : Graylog backing store
+#    - opensearch     : Graylog 5.x search backend (replaces Elasticsearch)
+#    - graylog        : Log aggregation + GELF input (UI: http://localhost:9000)
+#    - otel-collector : OTEL Collector fan-out (traces → Jaeger, metrics → Prometheus)
+#    - jaeger         : Distributed trace UI (http://localhost:16686)
+#    - prometheus     : Metrics scraping + storage (http://localhost:9090)
+#    - grafana        : Dashboards (http://localhost:3000, anonymous auth enabled)
+#    - sample-api     : The demo ASP.NET Core app (http://localhost:8080)
+#
+#  Usage:
+#    docker-compose up -d
+#    # Then open http://localhost:9000 (Graylog admin / admin)
+#    # Create a GELF UDP/TCP input on port 12201 in the Graylog UI.
+# ─────────────────────────────────────────────────────────────────────────────
+
+networks:
+  observability:
+    driver: bridge
+
+volumes:
+  mongodb_data:
+  opensearch_data:
+  graylog_data:
+  prometheus_data:
+  grafana_data:
+
+services:
+
+  # ── MongoDB (required by Graylog for metadata storage) ────────────────────
+  mongodb:
+    image: mongo:7.0
+    container_name: mongodb
+    restart: unless-stopped
+    networks:
+      - observability
+    volumes:
+      - mongodb_data:/data/db
+    command: ["--quiet"]
+
+  # ── OpenSearch (Graylog 5.x uses OpenSearch instead of Elasticsearch) ─────
+  opensearch:
+    image: opensearchproject/opensearch:2.12.0
+    container_name: opensearch
+    restart: unless-stopped
+    networks:
+      - observability
+    environment:
+      - discovery.type=single-node
+      - DISABLE_SECURITY_PLUGIN=true      # Disable TLS/auth for local dev
+      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - opensearch_data:/usr/share/opensearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health?pretty || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+
+  # ── Graylog 5.x ──────────────────────────────────────────────────────────
+  graylog:
+    image: graylog/graylog:5.2
+    container_name: graylog
+    restart: unless-stopped
+    networks:
+      - observability
+    depends_on:
+      mongodb:
+        condition: service_started
+      opensearch:
+        condition: service_healthy
+    environment:
+      # Change these in production!
+      GRAYLOG_PASSWORD_SECRET: "somepasswordpepper1234567890abcd"   # min 16 chars
+      # echo -n "admin" | sha256sum
+      GRAYLOG_ROOT_PASSWORD_SHA2: "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918"
+      GRAYLOG_HTTP_EXTERNAL_URI: "http://127.0.0.1:9000/"
+      GRAYLOG_ELASTICSEARCH_HOSTS: "http://opensearch:9200"
+      GRAYLOG_MONGODB_URI: "mongodb://mongodb:27017/graylog"
+    ports:
+      - "9000:9000"          # Graylog web UI
+      - "12201:12201/udp"    # GELF UDP input
+      - "12201:12201"        # GELF TCP input
+    volumes:
+      - graylog_data:/usr/share/graylog/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9000/api/system/lbstatus || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+
+  # ── Jaeger (all-in-one) ────────────────────────────────────────────────────
+  jaeger:
+    image: jaegertracing/all-in-one:1.57
+    container_name: jaeger
+    restart: unless-stopped
+    networks:
+      - observability
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16686:16686"   # Jaeger UI
+      # Internal OTLP gRPC port uses 4319 to avoid conflict with otel-collector's 4317.
+      - "4319:4317"
+
+  # ── Prometheus ────────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.51.2
+    container_name: prometheus
+    restart: unless-stopped
+    networks:
+      - observability
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+
+  # ── OTEL Collector (fan-out: traces → Jaeger, metrics → Prometheus) ───────
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.102.0
+    container_name: otel-collector
+    restart: unless-stopped
+    networks:
+      - observability
+    depends_on:
+      - jaeger
+      - prometheus
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    ports:
+      - "4317:4317"    # OTLP gRPC receiver (apps export here)
+      - "4318:4318"    # OTLP HTTP receiver
+      - "8888:8888"    # Collector self-metrics (scraped by Prometheus)
+
+  # ── Grafana ───────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.4.2
+    container_name: grafana
+    restart: unless-stopped
+    networks:
+      - observability
+    depends_on:
+      - prometheus
+      - jaeger
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+
+  # ── Sample API ────────────────────────────────────────────────────────────
+  sample-api:
+    build:
+      context: .
+      dockerfile: samples/Company.Observability.SampleApi/Dockerfile
+    container_name: sample-api
+    restart: unless-stopped
+    networks:
+      - observability
+    depends_on:
+      - graylog
+      - otel-collector
+    ports:
+      - "8080:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: "Production"
+      # Observability config via environment variable overrides (__ = section separator)
+      Observability__ServiceName: "SampleApi"
+      Observability__Logging__Graylog__Enabled: "true"
+      Observability__Logging__Graylog__Host: "graylog"
+      Observability__Logging__Graylog__Protocol: "tcp"
+      Observability__Telemetry__Otlp__Enabled: "true"
+      Observability__Telemetry__Otlp__Endpoint: "http://otel-collector:4317"
+      Observability__Telemetry__Metrics__PrometheusEnabled: "true"

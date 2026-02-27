@@ -1,0 +1,105 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+
+    <!--
+      Suppress NuGet warnings that are unavoidable when using pre-release OpenTelemetry
+      packages (NU1603 = approximate version match; NU1701 = package targets older TFM).
+      These are informational-only — the packages function correctly.
+    -->
+    <NoWarn>$(NoWarn);NU1603;NU1701</NoWarn>
+
+    <!-- NuGet package metadata -->
+    <PackageId>Company.Observability</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>YourCompany</Authors>
+    <Description>
+      Production-ready observability for .NET 8 microservices.
+      Serilog → Graylog (GELF) + OpenTelemetry traces + metrics (OTLP/Prometheus).
+      Includes PII redaction, correlation IDs, W3C trace enrichment, sampling, and noise control.
+    </Description>
+    <PackageTags>serilog;graylog;opentelemetry;observability;logging;tracing;metrics;microservices</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/yourcompany/Company.Observability</RepositoryUrl>
+  </PropertyGroup>
+
+  <!-- Expose internals to the test project for validator + internal-type tests -->
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>Company.Observability.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- ASP.NET Core framework (needed for routing/endpoint APIs in a non-web SDK library) -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+
+    <!-- Serilog core and ASP.NET Core integration -->
+    <PackageReference Include="Serilog" Version="4.0.2" />
+    <PackageReference Include="Serilog.AspNetCore" Version="8.0.3" />
+    <PackageReference Include="Serilog.Enrichers.Environment" Version="3.0.1" />
+    <PackageReference Include="Serilog.Enrichers.Process" Version="3.0.0" />
+    <PackageReference Include="Serilog.Enrichers.Thread" Version="4.0.0" />
+    <PackageReference Include="Serilog.Settings.Configuration" Version="8.0.4" />
+    <PackageReference Include="Serilog.Sinks.Graylog" Version="3.1.1" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
+    <!-- Required for WriteTo.Async() — not a transitive dep of Serilog.AspNetCore 8.x -->
+    <PackageReference Include="Serilog.Sinks.Async" Version="2.0.0" />
+    <!--
+      Serilog.Exceptions provides enrichment of exception details; included transitively
+      via Serilog.AspNetCore but listed explicitly for clarity.
+    -->
+    <PackageReference Include="Serilog.Exceptions" Version="8.4.0" />
+
+    <!--
+      OpenTelemetry packages — pinned to a mutually compatible set.
+      NOTE: OpenTelemetry.Exporter.Prometheus.AspNetCore and
+            OpenTelemetry.Instrumentation.Process are pre-release packages;
+            the nearest stable-adjacent versions are used here.
+            Monitor https://github.com/open-telemetry/opentelemetry-dotnet/releases for GA.
+    -->
+    <PackageReference Include="OpenTelemetry" Version="1.10.0" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.10.0" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.10.0" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.10.0" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.0.0" />
+    <!--
+      OpenTelemetry.Instrumentation.Process: the spec requested v0.5.0, but no version
+      compatible with OpenTelemetry >= 1.9.0 exists on NuGet.org (all available alpha
+      releases require OpenTelemetry.Api = 1.4.0-beta.2 which conflicts).
+      Process metrics (CPU usage, memory) are covered by AddRuntimeInstrumentation().
+      Uncomment and pin once a compatible release is published.
+    -->
+    <!-- <PackageReference Include="OpenTelemetry.Instrumentation.Process" Version="1.0.0-alpha.1" /> -->
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.10.0" />
+    <!--
+      Prometheus exporter is in beta (original spec: 1.9.0-rc.1 which was never published).
+      1.10.0-beta.1 requires OpenTelemetry >= 1.10.0 — hence the version bump above.
+      See README §FAQ for stability notes.
+    -->
+    <PackageReference Include="OpenTelemetry.Exporter.Prometheus.AspNetCore" Version="1.10.0-beta.1" />
+
+    <!-- Microsoft.Extensions -->
+    <PackageReference Include="Microsoft.Extensions.Options.DataAnnotations" Version="8.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Http.Abstractions" Version="2.2.0" />
+
+    <!--
+      SqlClient instrumentation (beta) — opt-in only.
+      To enable:
+        1. Uncomment the PackageReference below.
+        2. Add <DefineConstants>$(DefineConstants);SQL_CLIENT_INSTRUMENTATION</DefineConstants>
+           to a PropertyGroup in this file (or pass /p:DefineConstants=... on the CLI).
+        3. Set Observability:Telemetry:Tracing:SqlClientEnabled=true in appsettings.json.
+    -->
+    <!-- <PackageReference Include="OpenTelemetry.Instrumentation.SqlClient" Version="1.9.0-beta.1" /> -->
+  </ItemGroup>
+
+</Project>

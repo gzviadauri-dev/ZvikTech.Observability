@@ -1,0 +1,42 @@
+## .NET / MSBuild
+bin/
+obj/
+*.user
+*.suo
+.vs/
+*.swp
+*~
+
+## NuGet
+*.nupkg
+*.snupkg
+packages/
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+## Rider / JetBrains
+.idea/
+*.sln.iml
+
+## VS Code
+.vscode/
+
+## Test results & coverage
+TestResults/
+coverage/
+*.coverage
+*.coveragexml
+*.trx
+
+## Docker local data volumes (created by docker-compose)
+data/
+mongo-data/
+opensearch-data/
+grafana-data/
+
+## Secrets / local env overrides
+.env
+.env.*
+appsettings.Local.json
+secrets.json
